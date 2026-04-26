@@ -80,43 +80,50 @@ def transfer_json_data(data):
     host_stmt = ibm_db.prepare(conn, host_sql)
 
     verification_sql = """
-    INSERT INTO airbnb.host_verifications (host_id, verification)
-    VALUES (?, ?)
+        INSERT INTO airbnb.host_verifications (host_id, verification)
+        VALUES (?, ?)
     """
     verification_stmt = ibm_db.prepare(conn, verification_sql)
 
     prices_sql = """
-    INSERT INTO airbnb.prices (listing_id, price, security_deposit, cleaning_fee, extra_people, guests_included)
+    INSERT INTO airbnb.prices (listing_id, price, weekly_price, monthly_price, security_deposit, cleaning_fee, extra_people, guests_included)
     VALUES (?, ?, ?, ?, ?, ?)
     """
     prices_stmt = ibm_db.prepare(conn, prices_sql)
 
     amenities_sql = """
-    MERGE INTO airbnb.amenities t
-    USING (VALUES (?)) s(name)
-    ON t.name = s.name
-    WHEN NOT MATCHED THEN
-        INSERT (name) VALUES (s.name)
+        MERGE INTO airbnb.amenities t
+        USING (VALUES (?)) s(name)
+        ON t.name = s.name
+        WHEN NOT MATCHED THEN
+            INSERT (name) VALUES (s.name)
     """
     amenities_stmt = ibm_db.prepare(conn, amenities_sql)
 
     list_amenities_sql = """
-    MERGE INTO airbnb.list_amenities t
-    USING (VALUES (?, ?)) s(listing_id, amenity_id)
-    ON t.listing_id = s.listing_id AND t.amenity_id = s.amenity_id
-    WHEN NOT MATCHED THEN
-        INSERT (listing_id, amenity_id)
-        VALUES (s.listing_id, s.amenity_id)
+        MERGE INTO airbnb.list_amenities t
+        USING (VALUES (?, ?)) s(listing_id, amenity_id)
+        ON t.listing_id = s.listing_id AND t.amenity_id = s.amenity_id
+        WHEN NOT MATCHED THEN
+            INSERT (listing_id, amenity_id)
+            VALUES (s.listing_id, s.amenity_id)
     """
     list_amenities_stmt = ibm_db.prepare(conn, list_amenities_sql)
 
+    reviews_sql = """
+        INSERT INTO airbnb.reviews (
+            review_id, reviewer_id, date, comments, listing_id
+        ) VALUES (?, ?, ?, ?, ?)
+    """
+    reviews_stmt = ibm_db.prepare(conn, reviews_sql)
+
     reviewers_sql = """
-    MERGE INTO airbnb.reviewers t
-    USING (VALUES (?, ?)) s(reviewer_id, reviewer_name)
-    ON t.reviewer_id = s.reviewer_id
-    WHEN NOT MATCHED THEN
-        INSERT (reviewer_id, reviewer_name)
-        VALUES (s.reviewer_id, s.reviewer_name)
+        MERGE INTO airbnb.reviewers t
+        USING (VALUES (?, ?)) s(reviewer_id, reviewer_name)
+        ON t.reviewer_id = s.reviewer_id
+        WHEN NOT MATCHED THEN
+            INSERT (reviewer_id, reviewer_name)
+            VALUES (s.reviewer_id, s.reviewer_name)
     """
     reviewers_stmt = ibm_db.prepare(conn, reviewers_sql)
 
@@ -176,6 +183,29 @@ def transfer_json_data(data):
         row = ibm_db.fetch_tuple(identity_stmt)
         address_id = row[0]
 
+        # HOST
+        host = listing.get("host")
+        host_id = listing["host"]["host_id"]
+
+        host_params = (
+            host_id,
+            host.get("host_url"),
+            host.get("host_name"),
+            host.get("host_location"),
+            host.get("host_about"),
+            host.get("host_response_time"),
+            host.get("host_thumbnail_url"),
+            host.get("host_picture_url"),
+            host.get("host_neighbourhood"),
+            host.get("host_response_rate"),
+            host.get("host_is_superhost"),
+            host.get("host_has_profile_pic"),
+            host.get("host_identity_verified"),
+            host.get("host_listings_count"),
+            host.get("host_total_listings_count"),
+        )
+        ibm_db.execute(host_stmt, host_params)
+
         # LISTING_INFO
         listing_id = listing["_id"]
         name = listing.get("name")
@@ -205,43 +235,17 @@ def transfer_json_data(data):
         picture_url = images.get("picture_url")
         xl_picture_url = images.get("xl_picture_url")
 
-        host_id = listing["host"]["host_id"]
-
         listing_params = (listing_id,name,summary, space, description, property_type, room_type, bed_type, accommodates,
             bedrooms, beds, bathrooms, number_of_reviews, last_scraped, calendar_last_scraped, first_review,
             last_review, thumbnail_url, medium_url, picture_url, xl_picture_url, host_id, address_id)
 
         ibm_db.execute(listing_stmt, listing_params)
 
-        #HOST
-        host = listing.get("host")
-
-        host_params = (
-            host_id,
-            host.get("host_url"),
-            host.get("host_name"),
-            host.get("host_location"),
-            host.get("host_about"),
-            host.get("host_response_time"),
-            host.get("host_thumbnail_url"),
-            host.get("host_picture_url"),
-            host.get("host_neighbourhood"),
-            host.get("host_response_rate"),
-            host.get("host_is_superhost"),
-            host.get("host_has_profile_pic"),
-            host.get("host_identity_verified"),
-            host.get("host_listings_count"),
-            host.get("host_total_listings_count"),
-            host.get("host_listings_count")
-        )
-        ibm_db.execute(host_stmt, host_params)
-
         #HOST_VERIFICATION
         host_verifications = host.get("host_verifications", [])
 
         for v in host_verifications:
             ibm_db.execute(verification_stmt, (host_id, v))
-
 
         #PRICES
         guests = int(parse_decimal(listing.get("guests_included")))
@@ -251,48 +255,86 @@ def transfer_json_data(data):
             parse_decimal(listing.get("price")),
             parse_decimal(listing.get("weekly_price")),
             parse_decimal(listing.get("monthly_price")),
+            parse_decimal(listing.get("security_deposit")),
             parse_decimal(listing.get("cleaning_fee")),
             parse_decimal(listing.get("extra_people")),
             guests
         )
+
         ibm_db.execute(prices_stmt, prices_params)
 
         #AMENITIES
-        amenitites = listing.get("amenities")
+        amenities = listing.get("amenities")
 
-        for a in amenitites:
+        for a in amenities:
             ibm_db.execute(amenities_stmt, a)
 
-        #AMENITITES_LIST
-        identity_stmt_amenity = ibm_db.exec_immediate(conn, "VALUES IDENTITY_VAL_LOCAL()")
-        row_amenity = ibm_db.fetch_tuple(identity_stmt_amenity)
-        amenity_id = row_amenity[0]
+            #AMENITIES_LIST
+            identity_stmt_amenity = ibm_db.exec_immediate(conn, "VALUES IDENTITY_VAL_LOCAL()")
+            row_amenity = ibm_db.fetch_tuple(identity_stmt_amenity)
+            amenity_id = row_amenity[0]
 
-        list_amenities_params = (
+            list_amenities_params = (
+                listing_id,
+                amenity_id
+            )
+
+            ibm_db.execute(list_amenities_stmt, list_amenities_params)
+
+        # REVIEWERS
+        reviews = listing.get("reviews", [])
+
+
+
+        # REVIEWS
+
+        for r in reviews:
+            reviewers_params = (
+                int(r.get("reviewer_id")),
+                r.get("reviewer_name")
+            )
+            reviews_params = (
+                int(r.get("_id")),
+                r.get("reviewer_id"),
+                parse_date(r.get("date")),
+                r.get("comments"),
+                listing_id
+            )
+            ibm_db.execute(reviewers_stmt, reviewers_params)
+            ibm_db.execute(reviews_stmt, reviews_params)
+
+
+#       REVIEW_SCORES
+        rs = listing.get("review_scores")
+        if rs is not None:
+            review_scores_params = (
+                listing_id,
+                int(rs.get("review_scores_accuracy")),
+                int(rs.get("review_scores_cleanliness")),
+                int(rs.get("review_scores_checkin")),
+                int(rs.get("review_scores_communication")),
+                int(rs.get("review_scores_location")),
+                int(rs.get("review_scores_value")),
+                int(rs.get("review_scores_rating")),
+            )
+
+            ibm_db.execute(review_scores_stmt, review_scores_params)
+
+        #AVAILABILITY
+        av = listing.get("availability")
+
+        availability_params = (
             listing_id,
-            amenity_id
+            av.get("availability_30"),
+            av.get("availability_60"),
+            av.get("availability_90"),
+            av.get("availability_365")
         )
 
-        ibm_db.execute(list_amenities_stmt, list_amenities_params)
+        ibm_db.execute(availability_stmt, availability_params)
 
-        # amenities_sql = """
-        #     MERGE INTO airbnb.amenities t
-        #     USING (VALUES (?)) s(name)
-        #     ON t.name = s.name
-        #     WHEN NOT MATCHED THEN
-        #         INSERT (name) VALUES (s.name)
-        #     """
-        # amenities_stmt = ibm_db.prepare(conn, amenities_sql)
-        #
-        # list_amenities_sql = """
-        #     MERGE INTO airbnb.list_amenities t
-        #     USING (VALUES (?, ?)) s(listing_id, amenity_id)
-        #     ON t.listing_id = s.listing_id AND t.amenity_id = s.amenity_id
-        #     WHEN NOT MATCHED THEN
-        #         INSERT (listing_id, amenity_id)
-        #         VALUES (s.listing_id, s.amenity_id)
-        #     """
-        # list_amenities_stmt = ibm_db.prepare(conn, list_amenities_sql)
+    ibm_db.commit(conn)
+    ibm_db.close(conn)
 
 
 with open("airbnb document 1-6.json", encoding="utf-8") as f:

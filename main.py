@@ -62,21 +62,20 @@ def transfer_json_data(data):
     listing_stmt = ibm_db.prepare(conn, listing_sql)
 
     host_sql = """
-    INSERT INTO airbnb.hosts (
-        host_id,
-        host_name,
-        host_location,
-        host_about,
-        host_response_time,
-        host_response_rate,
-        host_is_superhost,
-        host_has_profile_pic,
-        host_identity_verified,
-        host_listings_count,
-        host_total_listings_count
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """
+        MERGE INTO airbnb.hosts t
+        USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)) 
+        s(host_id, host_url, host_name, host_location, host_about, host_response_time, host_thumbnail_url,
+          host_picture_url, host_neighbourhood, host_response_rate, host_is_superhost, host_has_profile_pic,
+          host_identity_verified, host_listings_count, host_total_listings_count)
+        ON t.host_id = s.host_id
+        WHEN NOT MATCHED THEN
+            INSERT (host_id, host_url, host_name, host_location, host_about, host_response_time, host_thumbnail_url,
+          host_picture_url, host_neighbourhood, host_response_rate, host_is_superhost, host_has_profile_pic,
+          host_identity_verified, host_listings_count, host_total_listings_count)
+            VALUES (s.host_id, s.host_url, s.host_name, s.host_location, s.host_about, s.host_response_time, 
+            s.host_thumbnail_url, s.host_picture_url, s.host_neighbourhood, s.host_response_rate, s.host_is_superhost, 
+            s.host_has_profile_pic, s.host_identity_verified, host_listings_count, s.host_total_listings_count)
+        """
     host_stmt = ibm_db.prepare(conn, host_sql)
 
     verification_sql = """
@@ -87,7 +86,7 @@ def transfer_json_data(data):
 
     prices_sql = """
     INSERT INTO airbnb.prices (listing_id, price, weekly_price, monthly_price, security_deposit, cleaning_fee, extra_people, guests_included)
-    VALUES (?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """
     prices_stmt = ibm_db.prepare(conn, prices_sql)
 
@@ -148,15 +147,6 @@ def transfer_json_data(data):
         VALUES (s.listing_id, s.availability_30, s.availability_60, s.availability_90, s.availability_365)
     """
     availability_stmt = ibm_db.prepare(conn, availability_sql)
-
-    # MERGE INTO target_table
-    # USING source_table
-    # ON merge_condition
-    # WHEN MATCHED THEN
-    # UPDATE SET column1 = value1[, column2 = value2...]
-    # WHEN NOT MATCHED THEN
-    # INSERT(column1[, column2...])
-    # VALUES(value1[, value2...]);
 
     for listing in data:
 
@@ -263,30 +253,27 @@ def transfer_json_data(data):
 
         ibm_db.execute(prices_stmt, prices_params)
 
-        #AMENITIES
-        amenities = listing.get("amenities")
+        # AMENITIES
+        amenities = listing.get("amenities", [])
+
+        select_amenity_sql = "SELECT amenity_id FROM airbnb.amenities WHERE name = ?"
+        select_stmt = ibm_db.prepare(conn, select_amenity_sql)
 
         for a in amenities:
-            ibm_db.execute(amenities_stmt, a)
+            ibm_db.execute(amenities_stmt, (a,))
 
-            #AMENITIES_LIST
-            identity_stmt_amenity = ibm_db.exec_immediate(conn, "VALUES IDENTITY_VAL_LOCAL()")
-            row_amenity = ibm_db.fetch_tuple(identity_stmt_amenity)
-            amenity_id = row_amenity[0]
+            ibm_db.execute(select_stmt, (a,))
+            row = ibm_db.fetch_tuple(select_stmt)
 
-            list_amenities_params = (
-                listing_id,
-                amenity_id
-            )
+            if not row:
+                raise Exception(f"Amenity not found after MERGE: {a}")
 
+            amenity_id = row[0]
+            list_amenities_params = (listing_id, amenity_id)
             ibm_db.execute(list_amenities_stmt, list_amenities_params)
 
-        # REVIEWERS
+        # REVIEWERS AND REVIEWS
         reviews = listing.get("reviews", [])
-
-
-
-        # REVIEWS
 
         for r in reviews:
             reviewers_params = (
@@ -295,7 +282,7 @@ def transfer_json_data(data):
             )
             reviews_params = (
                 int(r.get("_id")),
-                r.get("reviewer_id"),
+                int(r.get("reviewer_id")),
                 parse_date(r.get("date")),
                 r.get("comments"),
                 listing_id
@@ -306,7 +293,7 @@ def transfer_json_data(data):
 
 #       REVIEW_SCORES
         rs = listing.get("review_scores")
-        if rs is not None:
+        if rs:
             review_scores_params = (
                 listing_id,
                 int(rs.get("review_scores_accuracy")),

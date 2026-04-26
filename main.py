@@ -4,6 +4,18 @@ import json
 from datetime import datetime
 
 
+def parse_decimal(d):
+    if isinstance(d, dict) and "$numberDecimal" in d:
+        return Decimal(d["$numberDecimal"])
+    return None
+
+
+def parse_date(d):
+    if d:
+        return datetime.fromisoformat(d["$date"].replace("Z", ""))
+    return None
+
+
 def transfer_json_data(data):
     conn = None
     try:
@@ -17,7 +29,6 @@ def transfer_json_data(data):
             street, suburb, government_area, market, country, country_code, longitude, latitude, exact_location
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-
     address_stmt = ibm_db.prepare(conn, address_sql)
 
     listing_sql = """
@@ -48,7 +59,6 @@ def transfer_json_data(data):
         )
         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
-
     listing_stmt = ibm_db.prepare(conn, listing_sql)
 
     host_sql = """
@@ -67,7 +77,6 @@ def transfer_json_data(data):
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-
     host_stmt = ibm_db.prepare(conn, host_sql)
 
     verification_sql = """
@@ -82,14 +91,14 @@ def transfer_json_data(data):
     """
     prices_stmt = ibm_db.prepare(conn, prices_sql)
 
-    amenity_sql = """
+    amenities_sql = """
     MERGE INTO airbnb.amenities t
     USING (VALUES (?)) s(name)
     ON t.name = s.name
     WHEN NOT MATCHED THEN
         INSERT (name) VALUES (s.name)
     """
-    amenity_stmt = ibm_db.prepare(conn, amenity_sql)
+    amenities_stmt = ibm_db.prepare(conn, amenities_sql)
 
     list_amenities_sql = """
     MERGE INTO airbnb.list_amenities t
@@ -111,15 +120,36 @@ def transfer_json_data(data):
     """
     reviewers_stmt = ibm_db.prepare(conn, reviewers_sql)
 
-
-    MERGE INTO target_table
-    USING source_table
-    ON merge_condition
-    WHEN MATCHED THEN
-    UPDATE SET column1 = value1[, column2 = value2...]
+    review_scores_sql = """
+    MERGE INTO airbnb.review_scores t
+    USING (VALUES (?, ?, ?, ?, ?, ?, ?, ?)) 
+    s(listing_id, accuracy, cleanliness, checkin, communication, location, value, rating)
+    ON t.listing_id = s.listing_id
     WHEN NOT MATCHED THEN
-    INSERT(column1[, column2...])
-    VALUES(value1[, value2...]);
+        INSERT (listing_id, accuracy, cleanliness, checkin, communication, location, value, rating)
+        VALUES (s.listing_id, s.accuracy, s.cleanliness, s.checkin, s.communication, s.location, s.value, s.rating)
+    """
+    review_scores_stmt = ibm_db.prepare(conn, review_scores_sql)
+
+    availability_sql = """
+    MERGE INTO airbnb.availability t
+    USING (VALUES (?, ?, ?, ?, ?))
+    s(listing_id, availability_30, availability_60, availability_90, availability_365)
+    ON t.listing_id = s.listing_id
+    WHEN NOT MATCHED THEN
+        INSERT (listing_id, availability_30, availability_60, availability_90, availability_365)
+        VALUES (s.listing_id, s.availability_30, s.availability_60, s.availability_90, s.availability_365)
+    """
+    availability_stmt = ibm_db.prepare(conn, availability_sql)
+
+    # MERGE INTO target_table
+    # USING source_table
+    # ON merge_condition
+    # WHEN MATCHED THEN
+    # UPDATE SET column1 = value1[, column2 = value2...]
+    # WHEN NOT MATCHED THEN
+    # INSERT(column1[, column2...])
+    # VALUES(value1[, value2...]);
 
     for listing in data:
 
@@ -159,18 +189,9 @@ def transfer_json_data(data):
         bedrooms = listing.get("bedrooms")
         beds = listing.get("beds")
 
-        bathrooms = None
-        if listing.get("bathrooms"):
-            bathrooms = Decimal(listing["bathrooms"]["$numberDecimal"])
+        bathrooms = parse_decimal(listing.get("bathrooms"))
 
         number_of_reviews = listing.get("number_of_reviews")
-
-
-        def parse_date(d):
-            if d:
-                return datetime.fromisoformat(d["$date"].replace("Z", ""))
-            return None
-
 
         last_scraped = parse_date(listing.get("last_scraped"))
         calendar_last_scraped = parse_date(listing.get("calendar_last_scraped"))
@@ -221,7 +242,58 @@ def transfer_json_data(data):
         for v in host_verifications:
             ibm_db.execute(verification_stmt, (host_id, v))
 
+
         #PRICES
+        guests = int(parse_decimal(listing.get("guests_included")))
+
+        prices_params = (
+            listing_id,
+            parse_decimal(listing.get("price")),
+            parse_decimal(listing.get("weekly_price")),
+            parse_decimal(listing.get("monthly_price")),
+            parse_decimal(listing.get("cleaning_fee")),
+            parse_decimal(listing.get("extra_people")),
+            guests
+        )
+        ibm_db.execute(prices_stmt, prices_params)
+
+        #AMENITIES
+        amenitites = listing.get("amenities")
+
+        for a in amenitites:
+            ibm_db.execute(amenities_stmt, a)
+
+        #AMENITITES_LIST
+        identity_stmt_amenity = ibm_db.exec_immediate(conn, "VALUES IDENTITY_VAL_LOCAL()")
+        row_amenity = ibm_db.fetch_tuple(identity_stmt_amenity)
+        amenity_id = row_amenity[0]
+
+        list_amenities_params = (
+            listing_id,
+            amenity_id
+        )
+
+        ibm_db.execute(list_amenities_stmt, list_amenities_params)
+
+        # amenities_sql = """
+        #     MERGE INTO airbnb.amenities t
+        #     USING (VALUES (?)) s(name)
+        #     ON t.name = s.name
+        #     WHEN NOT MATCHED THEN
+        #         INSERT (name) VALUES (s.name)
+        #     """
+        # amenities_stmt = ibm_db.prepare(conn, amenities_sql)
+        #
+        # list_amenities_sql = """
+        #     MERGE INTO airbnb.list_amenities t
+        #     USING (VALUES (?, ?)) s(listing_id, amenity_id)
+        #     ON t.listing_id = s.listing_id AND t.amenity_id = s.amenity_id
+        #     WHEN NOT MATCHED THEN
+        #         INSERT (listing_id, amenity_id)
+        #         VALUES (s.listing_id, s.amenity_id)
+        #     """
+        # list_amenities_stmt = ibm_db.prepare(conn, list_amenities_sql)
+
 
 with open("airbnb document 1-6.json", encoding="utf-8") as f:
     data = json.load(f)

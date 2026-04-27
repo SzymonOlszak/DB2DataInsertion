@@ -1,0 +1,143 @@
+CREATE SCHEMA airbnb;
+
+CREATE TABLE airbnb.HOSTS (
+    host_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    host_url VARCHAR(250),
+    host_name VARCHAR(250),
+    host_location VARCHAR(250),
+    host_about CLOB,
+    host_response_time VARCHAR(50),
+    host_thumbnail_url VARCHAR(250),
+    host_picture_url VARCHAR(250),
+    host_neighbourhood VARCHAR(50),
+    host_response_rate INT CHECK (host_response_rate BETWEEN 0 AND 100),
+    host_is_superhost BOOLEAN,
+    host_has_profile_pic BOOLEAN,
+    host_identity_verified BOOLEAN,
+    host_listings_count INT,
+    host_total_listings_count INT
+);
+
+CREATE TABLE airbnb.ADDRESS (
+	address_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	street VARCHAR(100),
+	suburb VARCHAR(100),
+	government_area VARCHAR(100),
+	market VARCHAR(100),
+	country VARCHAR(100),
+	country_code VARCHAR(50),
+	longitude FLOAT,
+	latitude FLOAT,
+	exact_location BOOLEAN
+);
+
+CREATE TABLE airbnb.LISTING_INFO (
+	listing_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    name VARCHAR(255),
+    summary CLOB,
+    space CLOB,
+    description CLOB,
+    property_type VARCHAR(50),
+    room_type VARCHAR(50),
+    bed_type VARCHAR(50),
+    accommodates INT,
+    bedrooms INT,
+    beds INT,
+    bathrooms DECIMAL(3,1),
+    number_of_reviews INT,
+	last_scraped TIMESTAMP,
+	calendar_last_scraped TIMESTAMP,
+	first_review TIMESTAMP,
+	last_review TIMESTAMP,
+	thumbnail_url VARCHAR(555),
+    medium_url VARCHAR(555),
+    picture_url VARCHAR(555),
+    xl_picture_url VARCHAR(555),
+    host_id VARCHAR(20),
+    address_id INT,
+    FOREIGN KEY (host_id) REFERENCES airbnb.HOSTS(host_id),
+    FOREIGN KEY (address_id) REFERENCES airbnb.ADDRESS(address_id)
+);
+select * from airbnb.listing_info;
+
+CREATE TABLE airbnb.AMENITIES (
+	amenity_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL
+);
+
+CREATE TABLE airbnb.LIST_AMENITIES (
+    listing_id VARCHAR(20) NOT NULL,
+    amenity_id INT NOT NULL,
+    PRIMARY KEY (listing_id, amenity_id),
+    FOREIGN KEY (listing_id) REFERENCES airbnb.LISTING_INFO(listing_id),
+    FOREIGN KEY (amenity_id) REFERENCES airbnb.AMENITIES(amenity_id)
+);
+
+
+
+CREATE TABLE airbnb.HOST_VERIFICATIONS (
+    host_id VARCHAR(20) NOT NULL,
+    verification VARCHAR(50) NOT NULL,
+    PRIMARY KEY (host_id, verification),
+    FOREIGN KEY (host_id) REFERENCES airbnb.HOSTS(host_id)
+);
+
+CREATE TABLE airbnb.PRICES (
+	listing_id VARCHAR(20) NOT NULL PRIMARY KEY,
+	price DECIMAL(10,2),
+	weekly_price DECIMAL(10,2),
+	monthly_price DECIMAL(10,2),
+	security_deposit DECIMAL(10,2),
+	cleaning_fee DECIMAL(10,2),
+	extra_people DECIMAL(10,2),
+	guests_included INT,
+	FOREIGN KEY (listing_id) REFERENCES airbnb.LISTING_INFO(listing_id)
+);
+
+CREATE TABLE airbnb.REVIEWERS (
+    reviewer_id INT NOT NULL PRIMARY KEY,
+    reviewer_name VARCHAR(100)
+);
+
+CREATE TABLE airbnb.REVIEWS (
+    review_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    reviewer_id INT,
+    date DATE,
+    comments CLOB,
+    listing_id VARCHAR(20),
+    FOREIGN KEY (listing_id) REFERENCES airbnb.LISTING_INFO(listing_id),
+    FOREIGN KEY (reviewer_id) REFERENCES airbnb.REVIEWERS(reviewer_id)
+);
+
+CREATE TABLE airbnb.REVIEW_SCORES (
+    listing_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    accuracy INT,
+    cleanliness INT,
+    checkin INT,
+    communication INT,
+    location INT,
+    value INT,
+    rating INT,
+    FOREIGN KEY (listing_id) REFERENCES airbnb.LISTING_INFO(listing_id)
+);
+
+CREATE TABLE airbnb.AVAILABILITY (
+    listing_id VARCHAR(20) NOT NULL PRIMARY KEY,
+    availability_30 INT,
+    availability_60 INT,
+    availability_90 INT,
+    availability_365 INT,
+    FOREIGN KEY (listing_id) REFERENCES airbnb.LISTING_INFO(listing_id)
+);
+
+DROP TABLE airbnb.AVAILABILITY;
+DROP TABLE airbnb.LIST_AMENITIES;
+DROP TABLE airbnb.HOST_VERIFICATIONS;
+DROP TABLE airbnb.PRICES;
+DROP TABLE airbnb.REVIEWS;
+DROP TABLE airbnb.REVIEW_SCORES;
+DROP TABLE airbnb.AMENITIES;
+DROP TABLE airbnb.REVIEWERS;
+DROP TABLE airbnb.LISTING_INFO;
+DROP TABLE airbnb.HOSTS;
+DROP TABLE airbnb.ADDRESS;
